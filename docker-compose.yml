@@ -7,6 +7,7 @@ services:
     restart: unless-stopped
     ports:
       - "6000:6000"
+      - "127.0.0.1:8080:6000"
     environment:
       - PORT=6000
       - NODE_ENV=development
