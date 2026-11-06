@@ -1,0 +1,70 @@
+name: Deploy Cards Tutorial API
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cards-tutorial-production
+  cancel-in-progress: false
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+
+          printf '%s\n' "$SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          printf '%s\n' "$SSH_KNOWN_HOSTS" | tr -d '\r' > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy to DigitalOcean
+        run: |
+          ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+            -i ~/.ssh/id_ed25519 deploy@165.227.107.85 '
+              set -e
+              export PATH=/home/deploy/.nvm/versions/node/v26.13.0/bin:$PATH
+              cd /opt/cards-api
+              git pull --ff-only origin main
+              npm ci --omit=dev
+              sudo -n /usr/bin/systemctl restart cards-tutorial-api.service
+            '
+
+      - name: Verify deployed API
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if curl -fsS --max-time 10 https://cards-api.lukaszavaleta.xyz/api/ping | grep -q '"Hello World"'; then
+              echo "Deployment successful"
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
